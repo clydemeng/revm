@@ -1834,6 +1834,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-erc20-transfer"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "revm",
+]
+
+[[package]]
 name = "example-my-evm"
 version = "0.0.0"
 dependencies = [
@@ -3791,6 +3799,15 @@ dependencies = [
  "rstest",
  "serde",
  "tokio",
+]
+
+[[package]]
+name = "revm-ffi"
+version = "1.0.0"
+dependencies = [
+ "anyhow",
+ "hex",
+ "revm",
 ]
 
 [[package]]

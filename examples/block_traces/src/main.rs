@@ -25,6 +25,7 @@ struct FlushWriter {
     writer: Arc<Mutex<BufWriter<std::fs::File>>>,
 }
 
+
 impl FlushWriter {
     fn new(writer: Arc<Mutex<BufWriter<std::fs::File>>>) -> Self {
         Self { writer }
