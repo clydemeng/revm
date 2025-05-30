@@ -46,6 +46,53 @@ pub struct DeploymentResultFFI {
     pub gas_refunded: c_uint,
 }
 
+/// Configuration for REVM instance creation
+#[repr(C)]
+pub struct RevmConfigFFI {
+    /// Chain ID (1 for Ethereum mainnet, 56 for BSC mainnet, 97 for BSC testnet)
+    pub chain_id: u64,
+    /// Specification ID (hardfork version)
+    /// 0 = Frontier, 1 = Homestead, ... 18 = Cancun, 19 = Prague (default)
+    pub spec_id: u8,
+    /// Whether to disable nonce checks (useful for testing)
+    pub disable_nonce_check: bool,
+    /// Whether to disable balance checks (useful for testing)
+    pub disable_balance_check: bool,
+    /// Whether to disable block gas limit checks
+    pub disable_block_gas_limit: bool,
+    /// Whether to disable base fee checks
+    pub disable_base_fee: bool,
+    /// Maximum contract code size (0 for default 24KB limit)
+    pub max_code_size: u32,
+}
+
+impl Default for RevmConfigFFI {
+    fn default() -> Self {
+        Self {
+            chain_id: 1, // Ethereum mainnet
+            spec_id: 19, // Prague (latest)
+            disable_nonce_check: false,
+            disable_balance_check: false,
+            disable_block_gas_limit: false,
+            disable_base_fee: false,
+            max_code_size: 0, // Use default
+        }
+    }
+}
+
+/// Predefined chain configurations
+#[repr(C)]
+pub enum ChainPreset {
+    /// Ethereum mainnet (chain ID 1)
+    EthereumMainnet = 0,
+    /// BSC mainnet (chain ID 56)
+    BSCMainnet = 1,
+    /// BSC testnet Chapel (chain ID 97)
+    BSCTestnet = 2,
+    /// Custom configuration
+    Custom = 255,
+}
+
 impl ExecutionResultFFI {
     // This function is not used - conversion is handled in utils.rs
 }

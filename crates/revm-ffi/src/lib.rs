@@ -15,10 +15,12 @@ use std::os::raw::{c_char, c_int, c_uint};
 use std::ptr;
 
 use revm::{
-    context::Context,
+    context::{BlockEnv, CfgEnv, Context, TxEnv},
     database::CacheDB,
     database_interface::EmptyDB,
     ExecuteCommitEvm, ExecuteEvm, MainBuilder, MainContext,
+    primitives::{hardfork::SpecId, Address, Bytes, TxKind, U256},
+    Journal,
 };
 
 mod types;
@@ -31,16 +33,105 @@ pub use utils::*;
 /// Returns a pointer to the EVM instance or null on failure
 #[no_mangle]
 pub unsafe extern "C" fn revm_new() -> *mut RevmInstance {
-    let cache_db = CacheDB::<EmptyDB>::default();
-    let ctx = Context::mainnet().with_db(cache_db);
-    let evm = ctx.build_mainnet();
+    let config = RevmConfigFFI::default();
+    revm_new_with_config(&config)
+}
+
+/// Create a new REVM instance with a predefined chain preset
+#[no_mangle]
+pub extern "C" fn revm_new_with_preset(preset: ChainPreset) -> *mut RevmInstance {
+    let config = match preset {
+        ChainPreset::EthereumMainnet => RevmConfigFFI {
+            chain_id: 1,
+            spec_id: 19, // Prague
+            ..Default::default()
+        },
+        ChainPreset::BSCMainnet => RevmConfigFFI {
+            chain_id: 56,
+            spec_id: 18, // Cancun (BSC is typically one hardfork behind)
+            ..Default::default()
+        },
+        ChainPreset::BSCTestnet => RevmConfigFFI {
+            chain_id: 97,
+            spec_id: 18, // Cancun
+            ..Default::default()
+        },
+        ChainPreset::Custom => RevmConfigFFI::default(), // Fallback to default
+    };
+    revm_new_with_config(&config)
+}
+
+/// Create a new REVM instance with custom configuration
+#[no_mangle]
+pub extern "C" fn revm_new_with_config(config: *const RevmConfigFFI) -> *mut RevmInstance {
+    if config.is_null() {
+        return ptr::null_mut();
+    }
     
-    let instance = Box::new(RevmInstance {
+    let config = unsafe { &*config };
+    
+    // Convert spec_id to SpecId enum
+    let spec_id = match config.spec_id {
+        0 => SpecId::FRONTIER,
+        1 => SpecId::FRONTIER_THAWING,
+        2 => SpecId::HOMESTEAD,
+        3 => SpecId::DAO_FORK,
+        4 => SpecId::TANGERINE,
+        5 => SpecId::SPURIOUS_DRAGON,
+        6 => SpecId::BYZANTIUM,
+        7 => SpecId::CONSTANTINOPLE,
+        8 => SpecId::PETERSBURG,
+        9 => SpecId::ISTANBUL,
+        10 => SpecId::MUIR_GLACIER,
+        11 => SpecId::BERLIN,
+        12 => SpecId::LONDON,
+        13 => SpecId::ARROW_GLACIER,
+        14 => SpecId::GRAY_GLACIER,
+        15 => SpecId::MERGE,
+        16 => SpecId::SHANGHAI,
+        17 => SpecId::CANCUN,
+        18 => SpecId::CANCUN, // BSC uses Cancun-equivalent
+        19 => SpecId::PRAGUE,
+        20 => SpecId::OSAKA,
+        _ => SpecId::PRAGUE, // Default to latest
+    };
+    
+    // Create configuration environment
+    let mut cfg_env = CfgEnv::new_with_spec(spec_id);
+    cfg_env.chain_id = config.chain_id;
+    cfg_env.disable_nonce_check = config.disable_nonce_check;
+    
+    // Set optional features if enabled
+    #[cfg(feature = "optional_balance_check")]
+    {
+        cfg_env.disable_balance_check = config.disable_balance_check;
+    }
+    
+    #[cfg(feature = "optional_block_gas_limit")]
+    {
+        cfg_env.disable_block_gas_limit = config.disable_block_gas_limit;
+    }
+    
+    #[cfg(feature = "optional_no_base_fee")]
+    {
+        cfg_env.disable_base_fee = config.disable_base_fee;
+    }
+    
+    if config.max_code_size > 0 {
+        cfg_env.limit_contract_code_size = Some(config.max_code_size as usize);
+    }
+    
+    // Create cache database and context with custom configuration
+    let cache_db = CacheDB::<EmptyDB>::default();
+    let context = Context::new(cache_db, spec_id)
+        .with_cfg(cfg_env);
+    
+    let evm = context.build_mainnet();
+    
+    Box::into_raw(Box::new(RevmInstance { 
         evm,
         last_error: None,
-    });
-    
-    Box::into_raw(instance)
+    }))
 }
 
 /// Free a REVM instance
@@ -282,5 +373,145 @@ pub unsafe extern "C" fn revm_free_execution_result(result: *mut ExecutionResult
 pub unsafe extern "C" fn revm_free_deployment_result(result: *mut DeploymentResultFFI) {
     if !result.is_null() {
         let _ = Box::from_raw(result);
+    }
+}
+
+/// Get the chain ID of a REVM instance
+#[no_mangle]
+pub extern "C" fn revm_get_chain_id(instance: *const RevmInstance) -> u64 {
+    if instance.is_null() {
+        return 0;
+    }
+    
+    let instance = unsafe { &*instance };
+    instance.evm.ctx.cfg.chain_id
+}
+
+/// Get the spec ID of a REVM instance
+#[no_mangle]
+pub extern "C" fn revm_get_spec_id(instance: *const RevmInstance) -> u8 {
+    if instance.is_null() {
+        return 0;
+    }
+    
+    let instance = unsafe { &*instance };
+    instance.evm.ctx.cfg.spec as u8
+}
+
+/// Set account nonce
+#[no_mangle]
+pub unsafe extern "C" fn revm_set_nonce(
+    instance: *mut RevmInstance,
+    address: *const c_char,
+    nonce: u64,
+) -> c_int {
+    if instance.is_null() || address.is_null() {
+        return -1;
+    }
+    
+    let instance = &mut *instance;
+    
+    match set_nonce_impl(instance, address, nonce) {
+        Ok(()) => 0,
+        Err(e) => {
+            instance.last_error = Some(e.to_string());
+            -1
+        }
+    }
+}
+
+/// Get account nonce
+#[no_mangle]
+pub unsafe extern "C" fn revm_get_nonce(
+    instance: *mut RevmInstance,
+    address: *const c_char,
+) -> u64 {
+    if instance.is_null() || address.is_null() {
+        return 0;
+    }
+    
+    let instance = &mut *instance;
+    
+    match get_nonce_impl(instance, address) {
+        Ok(nonce) => nonce,
+        Err(e) => {
+            instance.last_error = Some(e.to_string());
+            0
+        }
+    }
+}
+
+/// Transfer ETH between accounts
+#[no_mangle]
+pub unsafe extern "C" fn revm_transfer(
+    instance: *mut RevmInstance,
+    from: *const c_char,
+    to: *const c_char,
+    value: *const c_char,
+    gas_limit: u64,
+) -> *mut ExecutionResultFFI {
+    if instance.is_null() || from.is_null() || to.is_null() || value.is_null() {
+        return ptr::null_mut();
+    }
+    
+    let instance = &mut *instance;
+    
+    match transfer_impl(instance, from, to, value, gas_limit) {
+        Ok(result) => Box::into_raw(Box::new(result)),
+        Err(e) => {
+            instance.last_error = Some(e.to_string());
+            ptr::null_mut()
+        }
+    }
+}
+
+/// Call a contract
+#[no_mangle]
+pub unsafe extern "C" fn revm_call_contract(
+    instance: *mut RevmInstance,
+    from: *const c_char,
+    to: *const c_char,
+    data: *const u8,
+    data_len: c_uint,
+    value: *const c_char,
+    gas_limit: u64,
+) -> *mut ExecutionResultFFI {
+    if instance.is_null() {
+        return std::ptr::null_mut();
+    }
+
+    let instance_ref = &mut *instance;
+    
+    match call_contract_impl(instance_ref, from, to, data, data_len, value, gas_limit) {
+        Ok(result) => Box::into_raw(Box::new(result)),
+        Err(e) => {
+            instance_ref.last_error = Some(e.to_string());
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Call a contract function (view call - doesn't commit state)
+#[no_mangle]
+pub unsafe extern "C" fn revm_view_call_contract(
+    instance: *mut RevmInstance,
+    from: *const c_char,
+    to: *const c_char,
+    data: *const u8,
+    data_len: c_uint,
+    gas_limit: u64,
+) -> *mut ExecutionResultFFI {
+    if instance.is_null() {
+        return std::ptr::null_mut();
+    }
+
+    let instance_ref = &mut *instance;
+    
+    match view_call_contract_impl(instance_ref, from, to, data, data_len, gas_limit) {
+        Ok(result) => Box::into_raw(Box::new(result)),
+        Err(e) => {
+            instance_ref.last_error = Some(e.to_string());
+            std::ptr::null_mut()
+        }
     }
 } 

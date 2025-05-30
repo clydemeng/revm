@@ -14,6 +14,10 @@ use revm::{
     handler::{EvmTr, ExecuteCommitEvm},
     primitives::{Address, Bytes, TxKind, U256},
     database_interface::Database,
+    context::{CfgEnv, Context},
+    database::{CacheDB, EmptyDBTyped},
+    state::AccountInfo,
+    ExecuteEvm,
 };
 
 use crate::types::{DeploymentResultFFI, ExecutionResultFFI, RevmInstance};
@@ -195,14 +199,27 @@ pub unsafe fn deploy_contract_impl(
     let bytecode_slice = slice::from_raw_parts(bytecode, bytecode_len as usize);
     let bytecode_bytes = Bytes::copy_from_slice(bytecode_slice);
 
+    // Get the chain ID from the context
+    let chain_id = instance.evm.ctx.cfg.chain_id;
+    
+    // Get the current nonce for the deployer
+    let current_nonce = {
+        let account = instance.evm.ctx().journal().db().basic(deployer_addr)?;
+        match account {
+            Some(acc) => acc.nonce,
+            None => 0,
+        }
+    };
+
     instance.evm.ctx().modify_tx(|tx| {
         tx.caller = deployer_addr;
         tx.kind = TxKind::Create;
         tx.data = bytecode_bytes;
         tx.gas_limit = gas_limit as u64;
         tx.gas_price = 1_000_000_000u128; // 1 gwei
-        tx.nonce = 0;
+        tx.nonce = current_nonce;
         tx.value = U256::ZERO;
+        tx.chain_id = Some(chain_id);
     });
 
     let result = instance.evm.replay_commit()?;
@@ -296,4 +313,186 @@ pub unsafe fn set_storage_impl(
     db.insert_account_storage(addr, slot_u256, value_u256)?;
     
     Ok(())
+}
+
+/// Set account nonce
+pub unsafe fn set_nonce_impl(
+    instance: &mut RevmInstance,
+    address: *const c_char,
+    nonce: u64,
+) -> Result<()> {
+    let addr = hex_to_address(&c_str_to_string(address)?)?;
+    
+    // Get existing account info or create new one
+    let db = instance.evm.ctx().journal().db();
+    let existing_account = db.basic(addr)?;
+    
+    let account_info = match existing_account {
+        Some(mut acc) => {
+            acc.nonce = nonce;
+            acc
+        }
+        None => revm::state::AccountInfo {
+            balance: U256::ZERO,
+            nonce,
+            code_hash: revm::primitives::KECCAK_EMPTY,
+            code: Some(revm::bytecode::Bytecode::default()),
+        },
+    };
+    
+    db.insert_account_info(addr, account_info);
+    Ok(())
+}
+
+/// Get account nonce
+pub unsafe fn get_nonce_impl(
+    instance: &mut RevmInstance,
+    address: *const c_char,
+) -> Result<u64> {
+    let addr = hex_to_address(&c_str_to_string(address)?)?;
+    let account = instance.evm.ctx().journal().db().basic(addr)?;
+    
+    match account {
+        Some(acc) => Ok(acc.nonce),
+        None => Ok(0),
+    }
+}
+
+/// Transfer ETH between accounts
+pub unsafe fn transfer_impl(
+    instance: &mut RevmInstance,
+    from: *const c_char,
+    to: *const c_char,
+    value: *const c_char,
+    gas_limit: u64,
+) -> Result<ExecutionResultFFI> {
+    let from_addr = hex_to_address(&c_str_to_string(from)?)?;
+    let to_addr = hex_to_address(&c_str_to_string(to)?)?;
+    let value_u256 = hex_to_u256(&c_str_to_string(value)?)?;
+
+    // Get the chain ID from the context
+    let chain_id = instance.evm.ctx.cfg.chain_id;
+    
+    // Get the current nonce for the caller
+    let current_nonce = {
+        let account = instance.evm.ctx().journal().db().basic(from_addr)?;
+        match account {
+            Some(acc) => acc.nonce,
+            None => 0,
+        }
+    };
+
+    instance.evm.ctx().modify_tx(|tx| {
+        tx.caller = from_addr;
+        tx.kind = TxKind::Call(to_addr);
+        tx.value = value_u256;
+        tx.data = Bytes::new();
+        tx.gas_limit = gas_limit;
+        tx.gas_price = 1_000_000_000u128; // 1 gwei
+        tx.nonce = current_nonce;
+        tx.chain_id = Some(chain_id);
+    });
+
+    let result = instance.evm.replay_commit()?;
+    Ok(convert_execution_result(result))
+}
+
+/// Call a contract
+pub unsafe fn call_contract_impl(
+    instance: &mut RevmInstance,
+    from: *const c_char,
+    to: *const c_char,
+    data: *const u8,
+    data_len: c_uint,
+    value: *const c_char,
+    gas_limit: u64,
+) -> Result<ExecutionResultFFI> {
+    let from_addr = hex_to_address(&c_str_to_string(from)?)?;
+    let to_addr = hex_to_address(&c_str_to_string(to)?)?;
+    
+    let value_u256 = if value.is_null() {
+        U256::ZERO
+    } else {
+        hex_to_u256(&c_str_to_string(value)?)?
+    };
+    
+    let call_data = if data.is_null() || data_len == 0 {
+        Bytes::new()
+    } else {
+        let slice = slice::from_raw_parts(data, data_len as usize);
+        Bytes::copy_from_slice(slice)
+    };
+
+    // Get the chain ID from the context
+    let chain_id = instance.evm.ctx.cfg.chain_id;
+    
+    // Get the current nonce for the caller
+    let current_nonce = {
+        let account = instance.evm.ctx().journal().db().basic(from_addr)?;
+        match account {
+            Some(acc) => acc.nonce,
+            None => 0,
+        }
+    };
+
+    instance.evm.ctx().modify_tx(|tx| {
+        tx.caller = from_addr;
+        tx.kind = TxKind::Call(to_addr);
+        tx.value = value_u256;
+        tx.data = call_data;
+        tx.gas_limit = gas_limit;
+        tx.gas_price = 1_000_000_000u128; // 1 gwei
+        tx.nonce = current_nonce;
+        tx.chain_id = Some(chain_id);
+    });
+
+    let result = instance.evm.replay_commit()?;
+    Ok(convert_execution_result(result))
+}
+
+/// Call a contract (view call - doesn't commit state)
+pub unsafe fn view_call_contract_impl(
+    instance: &mut RevmInstance,
+    from: *const c_char,
+    to: *const c_char,
+    data: *const u8,
+    data_len: c_uint,
+    gas_limit: u64,
+) -> Result<ExecutionResultFFI> {
+    let from_addr = hex_to_address(&c_str_to_string(from)?)?;
+    let to_addr = hex_to_address(&c_str_to_string(to)?)?;
+    
+    let call_data = if data.is_null() || data_len == 0 {
+        Bytes::new()
+    } else {
+        let slice = slice::from_raw_parts(data, data_len as usize);
+        Bytes::copy_from_slice(slice)
+    };
+
+    // Get the chain ID from the context
+    let chain_id = instance.evm.ctx.cfg.chain_id;
+    
+    // Get the current nonce for the caller
+    let current_nonce = {
+        let account = instance.evm.ctx().journal().db().basic(from_addr)?;
+        match account {
+            Some(acc) => acc.nonce,
+            None => 0,
+        }
+    };
+
+    instance.evm.ctx().modify_tx(|tx| {
+        tx.caller = from_addr;
+        tx.kind = TxKind::Call(to_addr);
+        tx.value = U256::ZERO; // View calls don't transfer value
+        tx.data = call_data;
+        tx.gas_limit = gas_limit;
+        tx.gas_price = 1_000_000_000u128; // 1 gwei
+        tx.nonce = current_nonce;
+        tx.chain_id = Some(chain_id);
+    });
+
+    // Use replay() instead of replay_commit() for view calls
+    let result = instance.evm.replay()?;
+    Ok(convert_execution_result(result.result))
 } 

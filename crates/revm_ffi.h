@@ -95,15 +95,6 @@ ExecutionResultFFI* revm_call_contract(
     uint64_t gas_limit
 );
 
-ExecutionResultFFI* revm_view_call_contract(
-    RevmInstance* instance,
-    const char* from,
-    const char* to,
-    const unsigned char* data,
-    unsigned int data_len,
-    uint64_t gas_limit
-);
-
 ExecutionResultFFI* revm_transfer(
     RevmInstance* instance,
     const char* from,

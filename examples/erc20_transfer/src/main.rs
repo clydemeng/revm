@@ -49,7 +49,7 @@ fn main() -> Result<()> {
     println!("\n📦 Deploying ERC20 contract...");
     let deployment_result = evm.replay_commit()?;
     
-    let contract_address = match deployment_result {
+    let contract_address: Address = match deployment_result {
         ExecutionResult::Success {
             output: Output::Create(_, Some(address)),
             gas_used,
