@@ -42,15 +42,13 @@ func main() {
 	fmt.Println("🚀 Native Go EVM ERC20 Transfer Benchmark")
 	fmt.Println("==========================================")
 
-	// Test different configurations - same as FFI benchmark
+	// Test configuration - only 1000 transfers on BSC Testnet
 	configs := []struct {
 		name         string
 		transferCount int
 		chainID      *big.Int
 	}{
-		{"100 transfers on BSC Testnet", 100, big.NewInt(97)},
 		{"1000 transfers on BSC Testnet", 1000, big.NewInt(97)},
-		{"1000 transfers on Ethereum Mainnet", 1000, big.NewInt(1)},
 	}
 
 	for i, config := range configs {
@@ -135,10 +133,12 @@ func runBenchmark(transferCount int, chainID *big.Int) {
 	
 	finalAliceBalance, _ := getTokenBalance(env, ALICE_ADDRESS, contractAddress)
 	finalBobBalance, _ := getTokenBalance(env, BOB_ADDRESS, contractAddress)
+	finalCharlieBalance, _ := getTokenBalance(env, CHARLIE_ADDRESS, contractAddress)
 	
-	fmt.Printf("✅ Alice: %s, Bob: %s (%v)\n", 
+	fmt.Printf("✅ Alice: %s, Bob: %s, Charlie: %s (%v)\n", 
 		formatTokenAmount(finalAliceBalance), 
 		formatTokenAmount(finalBobBalance), 
+		formatTokenAmount(finalCharlieBalance),
 		time.Since(verifyTime))
 
 	// 8. Print summary
@@ -160,54 +160,27 @@ func createEVMEnvironment(chainID *big.Int) (*EVMEnvironment, error) {
 		return nil, err
 	}
 
-	// Configure chain based on chain ID - use Cancun hardfork for PUSH0 support
-	var chainCfg *params.ChainConfig
-	if chainID.Cmp(big.NewInt(1)) == 0 {
-		// Ethereum Mainnet - use Cancun hardfork for PUSH0 support
-		chainCfg = &params.ChainConfig{
-			ChainID:                       big.NewInt(1),
-			HomesteadBlock:                big.NewInt(0),
-			DAOForkBlock:                  nil,
-			DAOForkSupport:                false,
-			EIP150Block:                   big.NewInt(0),
-			EIP155Block:                   big.NewInt(0),
-			EIP158Block:                   big.NewInt(0),
-			ByzantiumBlock:                big.NewInt(0),
-			ConstantinopleBlock:           big.NewInt(0),
-			PetersburgBlock:               big.NewInt(0),
-			IstanbulBlock:                 big.NewInt(0),
-			MuirGlacierBlock:              big.NewInt(0),
-			BerlinBlock:                   big.NewInt(0),
-			LondonBlock:                   big.NewInt(0),
-			ArrowGlacierBlock:             big.NewInt(0),
-			GrayGlacierBlock:              big.NewInt(0),
-			MergeNetsplitBlock:            big.NewInt(0),
-			ShanghaiTime:                  new(uint64),
-			CancunTime:                    new(uint64), // Enable Cancun for PUSH0
-		}
-	} else {
-		// BSC Testnet/Mainnet - use Cancun hardfork for PUSH0 support
-		chainCfg = &params.ChainConfig{
-			ChainID:                       chainID,
-			HomesteadBlock:                big.NewInt(0),
-			DAOForkBlock:                  nil,
-			DAOForkSupport:                false,
-			EIP150Block:                   big.NewInt(0),
-			EIP155Block:                   big.NewInt(0),
-			EIP158Block:                   big.NewInt(0),
-			ByzantiumBlock:                big.NewInt(0),
-			ConstantinopleBlock:           big.NewInt(0),
-			PetersburgBlock:               big.NewInt(0),
-			IstanbulBlock:                 big.NewInt(0),
-			MuirGlacierBlock:              big.NewInt(0),
-			BerlinBlock:                   big.NewInt(0),
-			LondonBlock:                   big.NewInt(0),
-			ArrowGlacierBlock:             big.NewInt(0),
-			GrayGlacierBlock:              big.NewInt(0),
-			MergeNetsplitBlock:            big.NewInt(0),
-			ShanghaiTime:                  new(uint64),
-			CancunTime:                    new(uint64), // Enable Cancun for PUSH0
-		}
+	// Configure for BSC Testnet - use Cancun hardfork for PUSH0 support
+	chainCfg := &params.ChainConfig{
+		ChainID:                       chainID,
+		HomesteadBlock:                big.NewInt(0),
+		DAOForkBlock:                  nil,
+		DAOForkSupport:                false,
+		EIP150Block:                   big.NewInt(0),
+		EIP155Block:                   big.NewInt(0),
+		EIP158Block:                   big.NewInt(0),
+		ByzantiumBlock:                big.NewInt(0),
+		ConstantinopleBlock:           big.NewInt(0),
+		PetersburgBlock:               big.NewInt(0),
+		IstanbulBlock:                 big.NewInt(0),
+		MuirGlacierBlock:              big.NewInt(0),
+		BerlinBlock:                   big.NewInt(0),
+		LondonBlock:                   big.NewInt(0),
+		ArrowGlacierBlock:             big.NewInt(0),
+		GrayGlacierBlock:              big.NewInt(0),
+		MergeNetsplitBlock:            big.NewInt(0),
+		ShanghaiTime:                  new(uint64),
+		CancunTime:                    new(uint64), // Enable Cancun for PUSH0
 	}
 
 	// Create block context
@@ -415,9 +388,15 @@ func getTokenBalance(env *EVMEnvironment, account, contract common.Address) (*bi
 }
 
 func performTransfers(env *EVMEnvironment, contract common.Address, count int) bool {
-	// Perform transfers from Alice to Bob (1 token each)
+	// Perform transfers from Alice alternating between Bob and Charlie (1 token each)
 	for i := 0; i < count; i++ {
-		if err := transferTokens(env, ALICE_ADDRESS, BOB_ADDRESS, contract, TRANSFER_AMOUNT); err != nil {
+		// Alternate between Bob and Charlie as recipients (same as FFI benchmark)
+		recipient := BOB_ADDRESS
+		if i%2 == 1 {
+			recipient = CHARLIE_ADDRESS
+		}
+		
+		if err := transferTokens(env, ALICE_ADDRESS, recipient, contract, TRANSFER_AMOUNT); err != nil {
 			fmt.Printf("❌ Transfer %d failed: %v\n", i+1, err)
 			return false
 		}

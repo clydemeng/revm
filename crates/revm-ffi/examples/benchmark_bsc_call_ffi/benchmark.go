@@ -56,27 +56,13 @@ func main() {
 	fmt.Println("🚀 REVM FFI ERC20 Transfer Benchmark")
 	fmt.Println("=====================================")
 
-	// Test different configurations
+	// Test configuration - only 1000 transfers on BSC Testnet
 	configs := []BenchmarkConfig{
-		{TransferCount: 100, BatchSize: 1, UseHelperContract: false, ChainPreset: C.BSC_TESTNET},
 		{TransferCount: 1000, BatchSize: 1, UseHelperContract: false, ChainPreset: C.BSC_TESTNET},
-		// Temporarily disable helper contract benchmark until individual transfers work
-		// {TransferCount: 1000, BatchSize: 10, UseHelperContract: true, ChainPreset: C.BSC_TESTNET},
-		{TransferCount: 1000, BatchSize: 1, UseHelperContract: false, ChainPreset: C.ETHEREUM_MAINNET},
 	}
 
-	for i, config := range configs {
-		fmt.Printf("\n📊 Benchmark %d: %d transfers", i+1, config.TransferCount)
-		if config.UseHelperContract {
-			fmt.Printf(" (batch size: %d)", config.BatchSize)
-		}
-		
-		chainName := "BSC Testnet"
-		if config.ChainPreset == C.ETHEREUM_MAINNET {
-			chainName = "Ethereum Mainnet"
-		}
-		fmt.Printf(" on %s\n", chainName)
-		
+	for _, config := range configs {
+		fmt.Printf("\n📊 Benchmark: %d transfers on BSC Testnet\n", config.TransferCount)
 		runBenchmark(config)
 	}
 }
@@ -129,15 +115,15 @@ func runBenchmark(config BenchmarkConfig) {
 	fmt.Printf("Balance: %s\n", formatTokenAmount(immediateBalance))
 
 	// Mint tokens to deployer using the mint function
-	fmt.Print("   🪙 Minting tokens to deployer... ")
-	if !mintTokens(instance, DEPLOYER_ADDRESS, erc20Address, TOTAL_SUPPLY) {
+	fmt.Print("   🪙 Minting tokens to Alice... ")
+	if !mintTokens(instance, ALICE_ADDRESS, erc20Address, TOTAL_SUPPLY) {
 		fmt.Println("❌ Failed to mint tokens")
 		return
 	}
 	
 	// Verify the minting worked
-	mintedBalance := getTokenBalance(instance, DEPLOYER_ADDRESS, erc20Address)
-	fmt.Printf("✅ New balance: %s\n", formatTokenAmount(mintedBalance))
+	aliceBalance := getTokenBalance(instance, ALICE_ADDRESS, erc20Address)
+	fmt.Printf("✅ Alice balance: %s\n", formatTokenAmount(aliceBalance))
 
 	var helperAddress string
 	if config.UseHelperContract {
@@ -167,23 +153,16 @@ func runBenchmark(config BenchmarkConfig) {
 	fmt.Printf("      Total supply: %s\n", formatTokenAmount(totalSupply))
 	
 	// Give Alice all the tokens
-	fmt.Print("      Transferring tokens to Alice... ")
-	if !transferTokens(instance, DEPLOYER_ADDRESS, ALICE_ADDRESS, erc20Address, TOTAL_SUPPLY) {
-		fmt.Println("❌ Failed to transfer tokens to Alice")
-		
-		// Debug: Check if deployer actually has tokens
-		deployerBalance := getTokenBalance(instance, DEPLOYER_ADDRESS, erc20Address)
-		aliceBalance := getTokenBalance(instance, ALICE_ADDRESS, erc20Address)
-		fmt.Printf("      Debug - Deployer balance: %s, Alice balance: %s\n", 
-			formatTokenAmount(deployerBalance), formatTokenAmount(aliceBalance))
-		return
-	}
+	fmt.Print("      Verifying Alice has tokens... ")
+	// Skip transfer since we minted directly to Alice
+	// if !transferTokens(instance, DEPLOYER_ADDRESS, ALICE_ADDRESS, erc20Address, TOTAL_SUPPLY) {
+	//	fmt.Println("❌ Failed to transfer tokens to Alice")
+	//	return
+	// }
 	
-	// Verify the transfer worked
-	deployerBalanceAfter := getTokenBalance(instance, DEPLOYER_ADDRESS, erc20Address)
-	aliceBalanceAfter := getTokenBalance(instance, ALICE_ADDRESS, erc20Address)
-	fmt.Printf("✅\n      After transfer - Deployer: %s, Alice: %s\n", 
-		formatTokenAmount(deployerBalanceAfter), formatTokenAmount(aliceBalanceAfter))
+	// Verify Alice has the tokens
+	aliceTokenBalance := getTokenBalance(instance, ALICE_ADDRESS, erc20Address)
+	fmt.Printf("✅ Alice has %s tokens\n", formatTokenAmount(aliceTokenBalance))
 
 	if config.UseHelperContract {
 		// Approve helper contract to spend Alice's tokens
@@ -222,12 +201,14 @@ func runBenchmark(config BenchmarkConfig) {
 	fmt.Print("   ✅ Verifying balances... ")
 	verifyTime := time.Now()
 	
-	aliceBalance := getTokenBalance(instance, ALICE_ADDRESS, erc20Address)
+	aliceBalance = getTokenBalance(instance, ALICE_ADDRESS, erc20Address)
 	bobBalance := getTokenBalance(instance, BOB_ADDRESS, erc20Address)
+	charlieBalance := getTokenBalance(instance, CHARLIE_ADDRESS, erc20Address)
 	
-	fmt.Printf("✅ Alice: %s, Bob: %s (%v)\n", 
+	fmt.Printf("✅ Alice: %s, Bob: %s, Charlie: %s (%v)\n", 
 		formatTokenAmount(aliceBalance), 
 		formatTokenAmount(bobBalance), 
+		formatTokenAmount(charlieBalance),
 		time.Since(verifyTime))
 
 	// 8. Print summary
