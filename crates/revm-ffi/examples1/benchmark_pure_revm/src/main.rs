@@ -25,7 +25,7 @@ fn main() {
     println!("🚀 Pure REVM Benchmark - BIGA Token Batch Transfers");
     
     // Load BIGA contract bytecode
-    let biga_bytecode = load_bytecode("bytecode/BIGA.bin");
+    let biga_bytecode = load_bytecode("../bytecode/BIGA.bin");
     
     // Initialize EVM
     let mut evm = Context::mainnet().build_mainnet();
@@ -171,15 +171,15 @@ fn perform_batch_transfers(evm: &mut MyEvm, num_transfers: u64, alice_nonce: &mu
     let mut calldata = Vec::new();
     calldata.extend_from_slice(&BATCH_TRANSFER_SELECTOR);
     calldata.extend_from_slice(&start_recipient.to_be_bytes::<32>());
-    calldata.extend_from_slice(&amount_per_transfer.to_be_bytes::<32>());
     calldata.extend_from_slice(&U256::from(num_transfers).to_be_bytes::<32>());
+    calldata.extend_from_slice(&amount_per_transfer.to_be_bytes::<32>());
 
     let tx = TxEnv {
         caller: ALICE,
         kind: TxKind::Call(BIGA_CONTRACT),
         data: Bytes::from(calldata),
         value: U256::ZERO,
-        gas_limit: 2_000_000_000, // Even higher gas limit for 50k transfers
+        gas_limit: 2_000_000_000, // Higher gas limit for 50k transfers
         nonce: *alice_nonce,
         ..Default::default()
     };
