@@ -10,16 +10,17 @@ contract BIGA {
     mapping(address => uint256) public balanceOf;
     mapping(address => mapping(address => uint256)) public allowance;
     
+    // Events
     event Transfer(address indexed from, address indexed to, uint256 value);
     event Approval(address indexed owner, address indexed spender, uint256 value);
     
-    function mint(address to, uint256 amount) external {
+    function mint(address to, uint256 amount) public {
         totalSupply += amount;
         balanceOf[to] += amount;
         emit Transfer(address(0), to, amount);
     }
     
-    function transfer(address to, uint256 amount) external returns (bool) {
+    function transfer(address to, uint256 amount) public returns (bool) {
         require(balanceOf[msg.sender] >= amount, "Insufficient balance");
         balanceOf[msg.sender] -= amount;
         balanceOf[to] += amount;
@@ -27,7 +28,7 @@ contract BIGA {
         return true;
     }
     
-    function transferFrom(address from, address to, uint256 amount) external returns (bool) {
+    function transferFrom(address from, address to, uint256 amount) public returns (bool) {
         require(balanceOf[from] >= amount, "Insufficient balance");
         require(allowance[from][msg.sender] >= amount, "Insufficient allowance");
         
@@ -39,7 +40,7 @@ contract BIGA {
         return true;
     }
     
-    function approve(address spender, uint256 amount) external returns (bool) {
+    function approve(address spender, uint256 amount) public returns (bool) {
         allowance[msg.sender][spender] = amount;
         emit Approval(msg.sender, spender, amount);
         return true;
@@ -50,7 +51,7 @@ contract BIGA {
         address startRecipient,
         uint256 transferCount,
         uint256 amountPerTransfer
-    ) external {
+    ) public {
         require(balanceOf[msg.sender] >= transferCount * amountPerTransfer, "Insufficient balance");
         
         // Convert startRecipient to uint256 for arithmetic
@@ -63,6 +64,8 @@ contract BIGA {
             // Perform the transfer
             balanceOf[msg.sender] -= amountPerTransfer;
             balanceOf[recipient] += amountPerTransfer;
+            
+            // Emit transfer event
             emit Transfer(msg.sender, recipient, amountPerTransfer);
         }
     }
